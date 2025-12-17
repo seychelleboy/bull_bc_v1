@@ -1,0 +1,40 @@
+# Virtual environment
+venv/
+.venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+
+# Environment
+.env
+config/.env
+
+# Database
+*.db
+*.db-wal
+*.db-shm
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+nul
+
+# Data
+data/database/*.db
+data/models/
+data/logs/
+data/backtest/
+
+# Keep directories
+!data/database/.gitkeep
+!data/models/.gitkeep
+!data/logs/.gitkeep
+!data/backtest/.gitkeep

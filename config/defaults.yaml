@@ -1,0 +1,338 @@
+# =============================================================================
+# BULL BC1 - MASTER CONFIGURATION (LONG ONLY)
+# =============================================================================
+# All tweakable values in one place. Override in config.local.yaml
+# Do NOT put secrets here - use .env for API keys
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# API CONFIGURATION
+# -----------------------------------------------------------------------------
+api:
+  eodhd:
+    base_url: "https://eodhd.com/api"
+    ws_url: "wss://ws.eodhistoricaldata.com/ws/crypto"
+    calls_per_second: 5
+    calls_per_minute: 100
+    calls_per_day: 100000
+    burst_size: 10
+    websocket_timeout_seconds: 30
+
+  coingecko:
+    base_url: "https://api.coingecko.com/api/v3"
+    calls_per_second: 5
+    calls_per_minute: 30
+    calls_per_day: 50000
+    burst_size: 5
+
+  fear_greed:
+    url: "https://api.alternative.me/fng/"
+
+  cryptopanic:
+    url: "https://cryptopanic.com/api/v1/posts/"
+
+# -----------------------------------------------------------------------------
+# CACHE TTLs (seconds)
+# -----------------------------------------------------------------------------
+cache:
+  quote_ttl: 5              # Real-time price quotes
+  price_ttl: 30             # Bitcoin current price
+  intraday_ttl: 60          # Intraday bars (1 min)
+  features_ttl: 300         # Calculated features (5 min)
+  news_ttl: 300             # News sentiment (5 min)
+  fear_greed_ttl: 300       # Fear & Greed Index (5 min - refresh often for responsiveness)
+  fundamentals_ttl: 3600    # Market fundamentals (1 hour)
+  bitcoin_history_ttl: 300  # Historical data (5 min)
+  global_data_ttl: 300      # CoinGecko global (5 min)
+  derivatives_ttl: 300      # Derivatives data (5 min)
+
+# -----------------------------------------------------------------------------
+# TRADING CONFIGURATION (LONG ONLY)
+# -----------------------------------------------------------------------------
+trading:
+  symbol: "BTCUSD"
+  direction: "LONG"              # Bull bot ONLY does LONG positions
+  auto_execute: true
+  paper_trade: false
+  paper_trade_slippage: 0.0      # Slippage % for paper trades (0.0 = perfect fills)
+  min_confidence_threshold: 80.0 # Only trade >= 80% confidence
+
+  # Timeframes
+  primary_timeframe: "4h"        # Main analysis timeframe
+  entry_timeframe: "1h"          # Fine-tune entry
+  trend_timeframe: "1d"          # Overall trend direction
+
+  # Position management
+  hold_overnight: true           # 24/7 crypto - hold through
+  use_trailing_stop: true
+  trailing_stop_atr_multiplier: 2.0
+  initial_stop_atr_multiplier: 2.5
+  atr_buffer_multiplier: 0.5     # ATR buffer for support adjustments
+
+  # Scanning
+  scan_interval_seconds: 300     # Scan every 5 minutes
+
+# -----------------------------------------------------------------------------
+# RISK MANAGEMENT
+# -----------------------------------------------------------------------------
+risk:
+  # Account settings
+  initial_balance: 10000.0
+  max_leverage: 3.0
+
+  # Position sizing
+  risk_per_trade_percent: 2.0    # Risk 2% per trade
+  max_position_size_usd: 10000.0
+  max_position_percent: 0.25     # Max 25% of account per position
+
+  # Daily limits
+  max_daily_loss_percent: 6.0    # Stop trading if down 6%
+  max_daily_trades: 10
+
+  # Drawdown protection
+  max_drawdown_percent: 15.0     # Emergency stop if down 15%
+
+  # Trade quality
+  min_reward_risk_ratio: 2.0     # Minimum 2:1 R:R
+  max_open_positions: 3
+
+  # Stop distances
+  min_stop_distance_pct: 0.5     # 0.5% minimum stop
+  max_stop_distance_pct: 5.0     # 5% maximum stop
+
+  # Kelly criterion parameters
+  kelly_default_win_rate: 0.65   # Default 65% win rate assumption
+  kelly_default_win_loss_ratio: 2.0
+  kelly_safety_multiplier: 0.5   # Use half-Kelly for safety
+  kelly_min: 0.01                # Minimum 1% position
+  kelly_max: 0.25                # Maximum 25% position
+
+# -----------------------------------------------------------------------------
+# CIRCUIT BREAKERS (Risk Protection)
+# -----------------------------------------------------------------------------
+circuit_breakers:
+  # Daily loss limit
+  enable_daily_loss_limit: true
+  max_daily_loss_percent: 6.0    # Stop trading if down 6% in one day
+
+  # Maximum positions limit
+  enable_max_positions_limit: true
+  max_positions: 3               # Maximum concurrent open positions
+
+  # MT5 connection health monitoring
+  enable_connection_check: true
+  connection_check_interval_seconds: 60   # Check every 60 seconds
+  connection_max_failures: 3              # Trip after 3 consecutive failures
+
+# -----------------------------------------------------------------------------
+# BACKTESTING CONFIGURATION
+# -----------------------------------------------------------------------------
+backtest:
+  enabled: true
+  default_days_back: 365         # Default backtest period
+  default_timeframe: "4h"        # Default analysis timeframe
+  initial_balance: 10000.0       # Starting balance for simulation
+  output_dir: "data/backtest"    # Report output directory
+  use_paper_slippage: false      # Apply slippage simulation
+
+# -----------------------------------------------------------------------------
+# BAIT SCORING CONFIGURATION (Multi-Factor Confidence Enhancement)
+# -----------------------------------------------------------------------------
+# BAIT = Behavioral + Analytical + Informational + Technical
+# Uses LONG-optimized weights for bull detection
+# INVERTED from SHORT: Higher score = more bullish = BETTER for LONG
+# -----------------------------------------------------------------------------
+scoring:
+  # Component weights for LONG signals
+  behavioral_weight: 0.30        # Fear & Greed (fear = contrarian buy opportunity)
+  analytical_weight: 0.25        # Funding rate (negative = bullish)
+  informational_weight: 0.25     # News catalyst detection
+  technical_weight: 0.20         # RSI, MACD, OBV, Bollinger
+
+  # Confidence thresholds for LONG signals (INVERTED - higher = more bullish)
+  strong_threshold: 75.0         # Score >= 75 = STRONG buy signal
+  moderate_threshold: 65.0       # Score >= 65 = MODERATE buy signal
+  weak_threshold: 55.0           # Score >= 55 = WEAK buy signal
+  # Score < 55 = AVOID (too bearish for longs)
+
+  # Catalyst keywords for informational scoring
+  bullish_keywords:
+    - "etf"
+    - "approval"
+    - "adoption"
+    - "institution"
+    - "treasury"
+    - "halving"
+    - "upgrade"
+    - "partnership"
+    - "integration"
+    - "launch"
+    - "accumulation"
+    - "buying"
+    - "bullish"
+    - "breakout"
+    - "rally"
+    - "milestone"
+    - "record"
+    - "growth"
+    - "expansion"
+    - "strategic"
+
+  bearish_keywords:
+    - "hack"
+    - "exploit"
+    - "bankruptcy"
+    - "crash"
+    - "sec"
+    - "lawsuit"
+    - "ban"
+    - "regulation"
+    - "investigation"
+    - "fraud"
+    - "ponzi"
+    - "sell-off"
+    - "dump"
+    - "liquidation"
+    - "delisting"
+    - "audit"
+
+  # Cache TTLs for scoring components (seconds)
+  behavioral_cache_ttl: 900      # 15 min (sentiment changes frequently)
+  analytical_cache_ttl: 21600    # 6 hours (fundamentals stable)
+  informational_cache_ttl: 600   # 10 min (news-dependent)
+  technical_cache_ttl: 300       # 5 min (price-sensitive)
+
+  # Ensemble integration
+  ensemble_confidence_threshold: 80.0   # Minimum confidence to trade
+
+# -----------------------------------------------------------------------------
+# SCENARIO DETECTION THRESHOLDS (BULLISH PATTERNS)
+# -----------------------------------------------------------------------------
+scenarios:
+  # Shared thresholds used across multiple scenarios
+  price_near_lows_pct: 1.02       # Within 2% of recent lows
+  divergence_slope_threshold: 0.001  # 0.1% slope for divergence detection
+
+  # Bullish Divergence (63.6% win rate)
+  # Detects: Price lower low + RSI higher low + OBV strength
+  bullish_divergence:
+    rsi_threshold: 40.0              # RSI must be below this (oversold zone)
+    obv_lookback: 20                 # Bars to check OBV trend
+    lookback_period: 20              # Price pattern lookback
+    divergence_lookback: 14          # Divergence detection window
+    price_low_tolerance: 0.005       # 0.5% tolerance for "lower low"
+
+  # Successful Breakout (70% win rate - BEST PERFORMER)
+  # Detects: Price breaks resistance AND holds above it + increasing volume
+  successful_breakout:
+    volume_surge_threshold: 1.5      # 50% volume increase for breakout
+    price_breakout_threshold: 0.02   # 2% above resistance = breakout
+    breakout_hold_threshold: 0.01    # Must hold 1% above resistance
+    rsi_not_overbought: 70           # RSI should not be extremely overbought
+    confirmation_bars: 2             # Bars to confirm breakout holds
+    confirmation_pct: 1.01           # Must be above 101% of resistance
+    magnitude_threshold: 0.03        # 3% breakout = significant
+    lookback_period: 20              # Resistance detection window
+
+  # Oversold (55-60% win rate)
+  # Detects: Price too far below VWAP/moving averages
+  oversold:
+    vwap_threshold: -0.03            # 3% below VWAP = oversold
+    atr_multiplier: 2.5              # ATR multiplier for volatility
+    rsi_threshold: 30                # RSI oversold level
+    bb_threshold: 0.0                # Below lower Bollinger Band
+    sma_deviation_threshold: -5.0    # 5% below SMA20
+    mean_reversion_target_pct: 1.03  # 3% reversion target (for LONG)
+
+  # Volume Breakout (60% win rate)
+  # Detects: OBV uptrend + high volume buying
+  volume_breakout:
+    obv_lookback: 20                 # OBV trend detection window
+    volume_spike: 2.0                # 2x average = spike (config value)
+    volume_multiplier: 1.5           # 1.5x for breakout confirmation
+    breakout_threshold: 0.01         # 1% price breakout
+    cmf_threshold: 0.1               # CMF above 0.1 = buying pressure
+    lookback_period: 20              # Pattern detection window
+
+  # Funding Extreme (65-70% win rate, Bitcoin-specific)
+  # Detects: NEGATIVE funding rate = overleveraged shorts = bullish
+  funding_extreme:
+    threshold: -0.001                # -0.1% funding rate = shorts overcrowded
+    volume_spike_threshold: 2.0      # 2x volume surge
+    target_pct: 1.03                 # 3% take profit target (for LONG)
+
+  # Bitcoin-specific market thresholds
+  btc_dominance_high_threshold: 55.0 # >55% = flight to safety
+  btc_dominance_low_threshold: 42.0  # <42% = alt season / risk-on
+  ath_near_threshold: 10.0           # Within 10% of ATH
+  ath_oversold_threshold: 50.0       # 50%+ from ATH = oversold (BULLISH for LONG)
+
+  # Fear & Greed classification thresholds
+  fear_greed:
+    extreme_fear_threshold: 25       # <= 25 = extreme fear (BULLISH for LONG)
+    extreme_greed_threshold: 75      # >= 75 = extreme greed (bearish)
+    neutral_low: 40                  # >= 40 and <= 60 = neutral
+    neutral_high: 60
+
+# -----------------------------------------------------------------------------
+# LOGGING CONFIGURATION
+# -----------------------------------------------------------------------------
+logging:
+  level: "INFO"
+  log_file: "data/logs/bull_bc_1.log"
+  max_bytes: 10000000              # 10MB max file size
+  backup_count: 5                  # Keep 5 backup files
+  format: "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
+
+# -----------------------------------------------------------------------------
+# DATABASE CONFIGURATION
+# -----------------------------------------------------------------------------
+database:
+  path: "data/database/bull_bc_1.db"
+  wal_mode: true                   # Write-Ahead Logging for thread safety
+
+# -----------------------------------------------------------------------------
+# PATHS CONFIGURATION
+# -----------------------------------------------------------------------------
+paths:
+  models_dir: "data/models"
+  logs_dir: "data/logs"
+  database_dir: "data/database"
+
+# -----------------------------------------------------------------------------
+# DATA SOURCE CONFIGURATION (Hybrid Architecture)
+# -----------------------------------------------------------------------------
+# Primary: MT5 Pepperstone (FREE) for BTC and correlation assets
+# Fallback: EODHD API ($79.99/mo) - also used for news
+# The "_SB" suffix indicates Spread Bet symbols (Pepperstone UK)
+# -----------------------------------------------------------------------------
+data_sources:
+  # Primary BTC data source: "mt5" or "eodhd"
+  btc_data_source: "mt5"
+
+  # Correlation asset sources (per-asset override)
+  correlation_sources:
+    gold: "mt5"       # XAUUSD_SB available on Pepperstone
+    sp500: "mt5"      # US500_SB available on Pepperstone
+    dxy: "mt5"        # USDX_SB available on Pepperstone
+    nasdaq: "mt5"     # NAS100_SB available on Pepperstone
+
+  # Fallback behavior
+  enable_fallback: true
+  fallback_source: "eodhd"
+
+# -----------------------------------------------------------------------------
+# MT5 CONFIGURATION (set in .env for credentials)
+# -----------------------------------------------------------------------------
+mt5:
+  # Trading/Execution symbols (Pepperstone UK - Spread Bet)
+  btc_symbol: "BTCUSD_SB"         # Bitcoin vs USD
+  gold_symbol: "XAUUSD_SB"        # Gold vs USD
+  sp500_symbol: "US500_SB"        # S&P 500 Index
+  dxy_symbol: "USDX_SB"           # US Dollar Index
+  nasdaq_symbol: "NAS100_SB"      # NASDAQ 100
+
+  # Connection settings
+  timeout_seconds: 60
+  retry_attempts: 3
+  max_bars_request: 10000         # MT5 limit per request
