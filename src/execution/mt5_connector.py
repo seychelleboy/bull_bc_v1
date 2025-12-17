@@ -375,6 +375,42 @@ class MT5Connector:
     # EXECUTION METHODS (LONG ONLY)
     # =========================================================================
 
+    def _validate_volume(self, volume: float, symbol_info: Dict) -> float:
+        """
+        Validate and adjust volume to meet symbol requirements.
+
+        Args:
+            volume: Requested volume
+            symbol_info: Symbol info with volume_min, volume_max, volume_step
+
+        Returns:
+            Adjusted volume that meets symbol requirements
+        """
+        volume_min = symbol_info.get('volume_min', 0.01)
+        volume_max = symbol_info.get('volume_max', 100.0)
+        volume_step = symbol_info.get('volume_step', 0.01)
+
+        # Round to volume_step (round to nearest valid increment)
+        if volume_step > 0:
+            # Round to nearest step
+            steps = round(volume / volume_step)
+            adjusted_volume = steps * volume_step
+            # Fix floating point precision
+            adjusted_volume = round(adjusted_volume, 8)
+        else:
+            adjusted_volume = volume
+
+        # Clamp to min/max
+        adjusted_volume = max(volume_min, min(volume_max, adjusted_volume))
+
+        if adjusted_volume != volume:
+            logger.info(
+                f"Volume adjusted: {volume:.6f} -> {adjusted_volume:.6f} "
+                f"(min={volume_min}, max={volume_max}, step={volume_step})"
+            )
+
+        return adjusted_volume
+
     async def place_order(
         self,
         symbol: str,
@@ -411,6 +447,27 @@ class MT5Connector:
         if not self._initialized:
             await self.initialize()
 
+        # Get symbol info and validate volume
+        symbol_info = await self.get_symbol_info(symbol)
+        if not symbol_info:
+            logger.error(f"Cannot get symbol info for {symbol}")
+            return OrderResult(
+                success=False,
+                error_message=f"Cannot get symbol info for {symbol}"
+            )
+
+        # Validate and adjust volume to meet MT5 requirements
+        validated_volume = self._validate_volume(volume, symbol_info)
+
+        # Check if volume is valid after adjustment
+        volume_min = symbol_info.get('volume_min', 0.01)
+        if validated_volume < volume_min:
+            logger.error(f"Volume {validated_volume} below minimum {volume_min}")
+            return OrderResult(
+                success=False,
+                error_message=f"Volume {validated_volume} below minimum {volume_min}"
+            )
+
         # Get current tick for market order
         if price is None:
             tick = await self.get_tick(symbol)
@@ -420,7 +477,7 @@ class MT5Connector:
         request = {
             'action': mt5.TRADE_ACTION_DEAL,
             'symbol': symbol,
-            'volume': volume,
+            'volume': validated_volume,
             'type': mt5.ORDER_TYPE_BUY,
             'price': price,
             'deviation': 20,  # Slippage in points
@@ -434,6 +491,8 @@ class MT5Connector:
             request['sl'] = sl
         if tp is not None:
             request['tp'] = tp
+
+        logger.info(f"[MT5] Placing BUY order: {symbol} vol={validated_volume} sl={sl} tp={tp}")
 
         # Send order
         result = await asyncio.to_thread(mt5.order_send, request)
