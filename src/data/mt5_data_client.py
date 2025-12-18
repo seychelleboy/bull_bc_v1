@@ -47,15 +47,22 @@ class MT5DataClient:
         self._connector: Optional[MT5Connector] = None
         self._initialized = False
 
-        # Cache for data (short TTL since we want fresh data)
-        cache_config = None
-        if config and hasattr(config, 'cache'):
-            cache_config = {
-                'quote_ttl': getattr(config.cache, 'quote_ttl', 5),
-                'price_ttl': getattr(config.cache, 'price_ttl', 30),
-            }
+        # Get TTLs from config or use defaults
+        self._quote_ttl = 5         # Real-time quotes
+        self._price_ttl = 30        # Current price
+        self._historical_ttl = 60   # Historical bars
 
-        self._cache = ThreadSafeCache(default_ttl=30)
+        if config and hasattr(config, 'cache'):
+            self._quote_ttl = getattr(config.cache, 'quote_ttl', 5)
+            self._price_ttl = getattr(config.cache, 'price_ttl', 30)
+            self._historical_ttl = getattr(config.cache, 'intraday_ttl', 60)
+
+        self._cache = ThreadSafeCache(default_ttl=self._price_ttl)
+
+        logger.debug(
+            f"MT5DataClient initialized with TTLs: quote={self._quote_ttl}s, "
+            f"price={self._price_ttl}s, historical={self._historical_ttl}s"
+        )
 
         # Symbol mapping
         self._symbols = {
@@ -187,8 +194,8 @@ class MT5DataClient:
             df = await self._connector.get_bars(mt5_symbol, mt5_tf, bars)
 
             if not df.empty:
-                # Cache for 60 seconds
-                self._cache.set(cache_key, df, ttl=60)
+                # Cache using configured TTL
+                self._cache.set(cache_key, df, ttl=self._historical_ttl)
 
             return df
 
@@ -237,8 +244,8 @@ class MT5DataClient:
                 'spread': tick.get('spread', 0),
             }
 
-            # Cache for 5 seconds
-            self._cache.set(cache_key, result, ttl=5)
+            # Cache using configured TTL
+            self._cache.set(cache_key, result, ttl=self._quote_ttl)
             return result
 
         except Exception as e:

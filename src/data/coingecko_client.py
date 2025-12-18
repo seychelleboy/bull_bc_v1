@@ -75,15 +75,40 @@ class CoinGeckoClient:
 
     BASE_URL = "https://api.coingecko.com/api/v3"
 
-    def __init__(self, cache: Optional[ThreadSafeCache] = None):
+    def __init__(
+        self,
+        cache: Optional[ThreadSafeCache] = None,
+        cache_config: Optional['CacheConfig'] = None
+    ):
         """
         Initialize CoinGecko client.
 
         Args:
             cache: Optional cache for responses
+            cache_config: Optional cache configuration with TTL settings
         """
-        self.cache = cache or ThreadSafeCache(default_ttl=60)  # 1 min cache
+        # Get TTLs from config or use defaults
+        self._price_ttl = 30           # Real-time price
+        self._fundamentals_ttl = 60    # Market data
+        self._global_ttl = 300         # Global metrics
+        self._history_ttl = 3600       # Historical data
+        self._derivatives_ttl = 300    # Derivatives data
+
+        if cache_config is not None:
+            self._price_ttl = getattr(cache_config, 'price_ttl', 30)
+            self._fundamentals_ttl = getattr(cache_config, 'fundamentals_ttl', 60)
+            self._global_ttl = getattr(cache_config, 'global_data_ttl', 300)
+            self._history_ttl = getattr(cache_config, 'bitcoin_history_ttl', 3600)
+            self._derivatives_ttl = getattr(cache_config, 'derivatives_ttl', 300)
+
+        default_ttl = self._fundamentals_ttl
+        self.cache = cache or ThreadSafeCache(default_ttl=default_ttl)
         self._session: Optional[aiohttp.ClientSession] = None
+
+        logger.debug(
+            f"CoinGeckoClient initialized with TTLs: price={self._price_ttl}s, "
+            f"fundamentals={self._fundamentals_ttl}s, global={self._global_ttl}s"
+        )
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create aiohttp session."""
@@ -152,7 +177,7 @@ class CoinGeckoClient:
             'simple/price',
             params={'ids': 'bitcoin', 'vs_currencies': 'usd'},
             cache_key='btc_price',
-            cache_ttl=30
+            cache_ttl=self._price_ttl
         )
         return data['bitcoin']['usd']
 
@@ -173,14 +198,14 @@ class CoinGeckoClient:
                 'developer_data': 'false'
             },
             cache_key='btc_coin',
-            cache_ttl=60
+            cache_ttl=self._fundamentals_ttl
         )
 
         # Get global data for dominance
         global_data = await self._request(
             'global',
             cache_key='global',
-            cache_ttl=300
+            cache_ttl=self._global_ttl
         )
 
         market = coin_data['market_data']
@@ -214,7 +239,7 @@ class CoinGeckoClient:
         Returns:
             Dictionary with global metrics
         """
-        data = await self._request('global', cache_key='global', cache_ttl=300)
+        data = await self._request('global', cache_key='global', cache_ttl=self._global_ttl)
 
         return {
             'total_market_cap': data['data']['total_market_cap']['usd'],
@@ -240,7 +265,7 @@ class CoinGeckoClient:
             'coins/bitcoin/market_chart',
             params={'vs_currency': 'usd', 'days': days},
             cache_key=f'btc_history_{days}',
-            cache_ttl=3600
+            cache_ttl=self._history_ttl
         )
 
         return {
@@ -261,7 +286,7 @@ class CoinGeckoClient:
                 'derivatives/exchanges',
                 params={'per_page': 10},
                 cache_key='derivatives',
-                cache_ttl=300
+                cache_ttl=self._derivatives_ttl
             )
 
             # Sum open interest across top exchanges

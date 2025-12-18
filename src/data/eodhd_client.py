@@ -80,7 +80,8 @@ class EODHDClient:
         self,
         api_key: str,
         rate_limiter: Optional[RateLimiter] = None,
-        cache: Optional[ThreadSafeCache] = None
+        cache: Optional[ThreadSafeCache] = None,
+        cache_config: Optional['CacheConfig'] = None
     ):
         """
         Initialize EODHD client.
@@ -89,6 +90,7 @@ class EODHDClient:
             api_key: EODHD API key
             rate_limiter: Optional rate limiter (creates default if not provided)
             cache: Optional cache for responses
+            cache_config: Optional cache configuration with TTL settings
         """
         self.api_key = api_key
         self.rate_limiter = rate_limiter or RateLimiter(
@@ -97,8 +99,27 @@ class EODHDClient:
             calls_per_day=100000,
             burst_size=10
         )
-        self.cache = cache or ThreadSafeCache(default_ttl=60)
+
+        # Get TTLs from config or use defaults
+        self._quote_ttl = 5            # Real-time quotes
+        self._intraday_ttl = 60        # Intraday data
+        self._history_ttl = 300        # Historical data
+        self._news_ttl = 300           # News articles
+
+        if cache_config is not None:
+            self._quote_ttl = getattr(cache_config, 'quote_ttl', 5)
+            self._intraday_ttl = getattr(cache_config, 'intraday_ttl', 60)
+            self._history_ttl = getattr(cache_config, 'bitcoin_history_ttl', 300)
+            self._news_ttl = getattr(cache_config, 'news_ttl', 300)
+
+        default_ttl = self._intraday_ttl
+        self.cache = cache or ThreadSafeCache(default_ttl=default_ttl)
         self._session: Optional[aiohttp.ClientSession] = None
+
+        logger.debug(
+            f"EODHDClient initialized with TTLs: quote={self._quote_ttl}s, "
+            f"intraday={self._intraday_ttl}s, history={self._history_ttl}s, news={self._news_ttl}s"
+        )
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create aiohttp session."""
@@ -219,7 +240,7 @@ class EODHDClient:
         else:
             endpoint = f"eod/{symbol}"
 
-        data = await self._request(endpoint, params, cache_ttl=300)
+        data = await self._request(endpoint, params, cache_ttl=self._history_ttl)
 
         # Parse response
         bars = []
@@ -279,7 +300,7 @@ class EODHDClient:
         if end_date:
             params['to'] = int(end_date.timestamp())
 
-        data = await self._request(f"intraday/{symbol}", params, cache_ttl=60)
+        data = await self._request(f"intraday/{symbol}", params, cache_ttl=self._intraday_ttl)
 
         bars = []
         if not isinstance(data, list):
@@ -323,7 +344,7 @@ class EODHDClient:
         Returns:
             Quote dictionary with price, change, volume, etc.
         """
-        data = await self._request(f"real-time/{symbol}", cache_ttl=5)
+        data = await self._request(f"real-time/{symbol}", cache_ttl=self._quote_ttl)
         return data if isinstance(data, dict) else {}
 
     async def get_quotes_bulk(self, symbols: List[str]) -> Dict[str, Dict]:
@@ -337,7 +358,7 @@ class EODHDClient:
             Dictionary of symbol -> quote data
         """
         symbol_str = ','.join(symbols)
-        data = await self._request(f"real-time/{symbol_str}", cache_ttl=5)
+        data = await self._request(f"real-time/{symbol_str}", cache_ttl=self._quote_ttl)
 
         # Handle single vs multiple response
         if isinstance(data, dict):
@@ -374,7 +395,7 @@ class EODHDClient:
             'limit': limit,
             'offset': offset
         }
-        data = await self._request('news', params, cache_ttl=300)
+        data = await self._request('news', params, cache_ttl=self._news_ttl)
         return data if isinstance(data, list) else []
 
     async def get_crypto_news(self, limit: int = 50) -> List[Dict]:
@@ -391,7 +412,7 @@ class EODHDClient:
             't': 'crypto',
             'limit': limit
         }
-        data = await self._request('news', params, cache_ttl=300)
+        data = await self._request('news', params, cache_ttl=self._news_ttl)
         return data if isinstance(data, list) else []
 
     # =========================================================================

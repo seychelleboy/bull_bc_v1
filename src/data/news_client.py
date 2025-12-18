@@ -72,7 +72,8 @@ class CryptoPanicClient:
     def __init__(
         self,
         auth_token: Optional[str] = None,
-        cache: Optional[ThreadSafeCache] = None
+        cache: Optional[ThreadSafeCache] = None,
+        cache_config: Optional['CacheConfig'] = None
     ):
         """
         Initialize CryptoPanic client.
@@ -80,10 +81,20 @@ class CryptoPanicClient:
         Args:
             auth_token: Optional API token (free tier works without)
             cache: Optional cache for responses
+            cache_config: Optional cache configuration with TTL settings
         """
         self.auth_token = auth_token
-        self.cache = cache or ThreadSafeCache(default_ttl=300)  # 5 min cache
+
+        # Get TTL from config or use default
+        default_ttl = 300  # 5 min default
+        if cache_config is not None:
+            default_ttl = getattr(cache_config, 'news_ttl', 300)
+
+        self._cache_ttl = default_ttl
+        self.cache = cache or ThreadSafeCache(default_ttl=default_ttl)
         self._session: Optional[aiohttp.ClientSession] = None
+
+        logger.debug(f"CryptoPanicClient initialized with cache TTL: {default_ttl}s")
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create aiohttp session."""
@@ -141,7 +152,7 @@ class CryptoPanicClient:
                 data = await response.json()
 
                 if use_cache:
-                    self.cache.set(cache_key, data)
+                    self.cache.set(cache_key, data, ttl=self._cache_ttl)
 
                 return data
 

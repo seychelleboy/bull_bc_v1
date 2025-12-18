@@ -40,49 +40,73 @@ class AggregatedData:
     - BAIT scoring
     - Scenario detection (LONG patterns)
     """
-    # Price data
-    prices_4h: pd.DataFrame  # Primary timeframe
-    prices_1h: pd.DataFrame  # Entry timing
-    prices_daily: pd.DataFrame  # Trend
+    # Price data - dynamic primary timeframe
+    prices_primary: pd.DataFrame  # Primary timeframe (from config)
+    prices_entry: pd.DataFrame  # Entry timing timeframe (from config)
+    prices_trend: pd.DataFrame  # Trend timeframe (from config)
     current_price: float
 
+    # Timeframe metadata
+    primary_timeframe: str = '4h'
+    entry_timeframe: str = '1h'
+    trend_timeframe: str = '1d'
+
     # Sentiment
-    fear_greed: Dict[str, Any]
+    fear_greed: Dict[str, Any] = field(default_factory=dict)
 
     # Market metrics
-    btc_market: Dict[str, Any]
+    btc_market: Dict[str, Any] = field(default_factory=dict)
 
     # Correlation assets
-    correlation_data: Dict[str, pd.DataFrame]
+    correlation_data: Dict[str, pd.DataFrame] = field(default_factory=dict)
 
     # News sentiment
-    news_sentiment: Dict[str, Any]
+    news_sentiment: Dict[str, Any] = field(default_factory=dict)
 
     # Metadata
-    timestamp: datetime
-    fetch_duration_ms: int
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    fetch_duration_ms: int = 0
     errors: List[str] = field(default_factory=list)
+
+    # Legacy aliases for backward compatibility
+    @property
+    def prices_4h(self) -> pd.DataFrame:
+        """Legacy alias - returns primary prices."""
+        return self.prices_primary
+
+    @property
+    def prices_1h(self) -> pd.DataFrame:
+        """Legacy alias - returns entry prices."""
+        return self.prices_entry
+
+    @property
+    def prices_daily(self) -> pd.DataFrame:
+        """Legacy alias - returns trend prices."""
+        return self.prices_trend
 
     def to_dict(self) -> Dict:
         """Convert to dictionary for logging/storage."""
         return {
             'current_price': self.current_price,
+            'primary_timeframe': self.primary_timeframe,
+            'entry_timeframe': self.entry_timeframe,
+            'trend_timeframe': self.trend_timeframe,
             'fear_greed': self.fear_greed,
             'btc_market': self.btc_market,
             'news_sentiment': self.news_sentiment,
             'timestamp': self.timestamp.isoformat(),
             'fetch_duration_ms': self.fetch_duration_ms,
             'errors': self.errors,
-            'prices_4h_rows': len(self.prices_4h),
-            'prices_1h_rows': len(self.prices_1h),
-            'prices_daily_rows': len(self.prices_daily)
+            'prices_primary_rows': len(self.prices_primary),
+            'prices_entry_rows': len(self.prices_entry),
+            'prices_trend_rows': len(self.prices_trend)
         }
 
     def is_valid(self) -> bool:
         """Check if data is valid for analysis."""
         return (
             self.current_price > 0 and
-            len(self.prices_4h) >= 50 and
+            len(self.prices_primary) >= 50 and
             bool(self.btc_market)
         )
 
@@ -124,13 +148,34 @@ class DataAggregator:
         """
         self.config = config
 
+        # Timeframe configuration (from trading config)
+        self._primary_timeframe = '4h'
+        self._entry_timeframe = '1h'
+        self._trend_timeframe = '1d'
+
+        if config and hasattr(config, 'trading'):
+            self._primary_timeframe = getattr(config.trading, 'primary_timeframe', '4h')
+            self._entry_timeframe = getattr(config.trading, 'entry_timeframe', '1h')
+            self._trend_timeframe = getattr(config.trading, 'trend_timeframe', '1d')
+
+        logger.info(
+            f"Timeframes configured: primary={self._primary_timeframe}, "
+            f"entry={self._entry_timeframe}, trend={self._trend_timeframe}"
+        )
+
+        # Cache TTL configuration
+        self._cache_config = None
+        if config and hasattr(config, 'cache'):
+            self._cache_config = config.cache
+
         # Shared cache for all clients
         self.cache = ThreadSafeCache(default_ttl=cache_ttl)
 
-        # Initialize EODHD client (fallback and news)
+        # Initialize EODHD client (fallback and news) with cache config
         self.eodhd = EODHDClient(
             api_key=eodhd_api_key,
-            cache=self.cache
+            cache=self.cache,
+            cache_config=self._cache_config
         )
 
         # Initialize MT5 client (primary data source)
@@ -145,14 +190,15 @@ class DataAggregator:
             self._btc_source = config.data_sources.btc_data_source
             self._enable_fallback = config.data_sources.enable_fallback
 
-        # Initialize other clients
-        self.fear_greed = FearGreedClient(cache=self.cache)
-        self.coingecko = CoinGeckoClient(cache=self.cache)
+        # Initialize other clients with cache config
+        self.fear_greed = FearGreedClient(cache=self.cache, cache_config=self._cache_config)
+        self.coingecko = CoinGeckoClient(cache=self.cache, cache_config=self._cache_config)
         self.news = NewsAggregator(
             eodhd_client=self.eodhd,
             cryptopanic_client=CryptoPanicClient(
                 auth_token=cryptopanic_token,
-                cache=self.cache
+                cache=self.cache,
+                cache_config=self._cache_config
             )
         )
 
@@ -292,6 +338,7 @@ class DataAggregator:
         Get all data needed for analysis.
 
         Fetches from all sources in parallel for efficiency.
+        Uses configured timeframes (primary, entry, trend) instead of hardcoded values.
 
         Args:
             lookback_days: Days of historical data to fetch
@@ -304,11 +351,22 @@ class DataAggregator:
         start_time = datetime.now(timezone.utc)
         errors = []
 
-        # Build list of tasks to run in parallel
+        # Calculate appropriate lookback for each timeframe
+        # Shorter timeframes need less lookback days to avoid fetching too much data
+        entry_lookback = self._calculate_lookback_days(self._entry_timeframe, lookback_days)
+        trend_lookback = lookback_days  # Trend always uses full lookback
+
+        logger.debug(
+            f"Fetching data: primary={self._primary_timeframe} ({lookback_days}d), "
+            f"entry={self._entry_timeframe} ({entry_lookback}d), "
+            f"trend={self._trend_timeframe} ({trend_lookback}d)"
+        )
+
+        # Build list of tasks to run in parallel using configured timeframes
         tasks = {
-            'prices_4h': self._fetch_prices('4h', lookback_days),
-            'prices_1h': self._fetch_prices('1h', min(lookback_days, 30)),
-            'prices_daily': self._fetch_prices('d', lookback_days),
+            'prices_primary': self._fetch_prices(self._primary_timeframe, lookback_days),
+            'prices_entry': self._fetch_prices(self._entry_timeframe, entry_lookback),
+            'prices_trend': self._fetch_prices(self._trend_timeframe, trend_lookback),
             'quote': self._fetch_quote(),
             'fear_greed': self._fetch_fear_greed(),
             'btc_market': self._fetch_btc_market(),
@@ -337,14 +395,17 @@ class DataAggregator:
         if results.get('quote'):
             current_price = float(results['quote'].get('close', 0))
 
-        # Build aggregated data
+        # Build aggregated data with dynamic timeframes
         fetch_duration = int((datetime.now(timezone.utc) - start_time).total_seconds() * 1000)
 
         data = AggregatedData(
-            prices_4h=results.get('prices_4h', pd.DataFrame()),
-            prices_1h=results.get('prices_1h', pd.DataFrame()),
-            prices_daily=results.get('prices_daily', pd.DataFrame()),
+            prices_primary=results.get('prices_primary', pd.DataFrame()),
+            prices_entry=results.get('prices_entry', pd.DataFrame()),
+            prices_trend=results.get('prices_trend', pd.DataFrame()),
             current_price=current_price,
+            primary_timeframe=self._primary_timeframe,
+            entry_timeframe=self._entry_timeframe,
+            trend_timeframe=self._trend_timeframe,
             fear_greed=results.get('fear_greed', {}),
             btc_market=results.get('btc_market', {}),
             correlation_data=results.get('correlation', {}),
@@ -354,8 +415,39 @@ class DataAggregator:
             errors=errors
         )
 
-        logger.info(f"Data aggregation completed in {fetch_duration}ms with {len(errors)} errors")
+        logger.info(
+            f"Data aggregation completed in {fetch_duration}ms with {len(errors)} errors "
+            f"(timeframe: {self._primary_timeframe})"
+        )
         return data
+
+    def _calculate_lookback_days(self, timeframe: str, base_lookback: int) -> int:
+        """
+        Calculate appropriate lookback days for a timeframe.
+
+        Shorter timeframes don't need as many days of data.
+
+        Args:
+            timeframe: Timeframe string (e.g., '5m', '1h', '4h')
+            base_lookback: Base lookback days
+
+        Returns:
+            Adjusted lookback days
+        """
+        # Map timeframes to maximum useful lookback
+        max_lookback = {
+            '1m': 3,    # 1-minute: max 3 days (~4320 bars)
+            '5m': 7,    # 5-minute: max 7 days (~2016 bars)
+            '15m': 14,  # 15-minute: max 14 days (~1344 bars)
+            '30m': 30,  # 30-minute: max 30 days (~1440 bars)
+            '1h': 30,   # 1-hour: max 30 days (~720 bars)
+            '4h': 90,   # 4-hour: max 90 days (~540 bars)
+            'd': 365,   # Daily: full year
+            '1d': 365,
+        }
+        tf_lower = timeframe.lower()
+        max_days = max_lookback.get(tf_lower, base_lookback)
+        return min(base_lookback, max_days)
 
     async def _fetch_quote(self) -> Dict:
         """Fetch current BTC quote from best available source."""

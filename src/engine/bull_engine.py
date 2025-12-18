@@ -153,12 +153,12 @@ class BullEngine(BaseEngine):
             current_price = aggregated_data.current_price
             logger.info(f"Current BTC price: ${current_price:,.2f}")
 
-            # Step 2: Calculate technical indicators
+            # Step 2: Calculate technical indicators using configured timeframe
             indicators = self._calculate_indicators(aggregated_data)
 
-            # Step 3: Prepare data for scenarios
+            # Step 3: Prepare data for scenarios using dynamic primary timeframe
             scenario_data = {
-                'prices': aggregated_data.prices_4h,
+                'prices': aggregated_data.prices_primary,  # Uses configured timeframe
                 'indicators': indicators,
                 'current_price': current_price,
                 'btc_market': aggregated_data.btc_market,
@@ -228,7 +228,17 @@ class BullEngine(BaseEngine):
                 stop_loss = levels.stop_loss
                 take_profit = levels.take_profit
 
-            # Step 9: Calculate position size
+            # Step 9: Update balance from MT5 and calculate position size
+            if self.mt5_connector and not self.config.trading.paper_trade:
+                try:
+                    account_info = await self.mt5_connector.get_account_info()
+                    if account_info and account_info.get('equity', 0) > 0:
+                        real_equity = account_info['equity']
+                        self.position_sizer.update_balance(real_equity)
+                        logger.debug(f"Updated balance from MT5: ${real_equity:,.2f}")
+                except Exception as e:
+                    logger.warning(f"Could not fetch MT5 balance: {e}")
+
             position = self.position_sizer.calculate(
                 entry_price=entry_price,
                 stop_loss=stop_loss,
@@ -338,12 +348,14 @@ class BullEngine(BaseEngine):
         logger.info("Bull Engine shutdown complete")
 
     def _calculate_indicators(self, data) -> Dict[str, Any]:
-        """Calculate technical indicators from price data."""
+        """Calculate technical indicators from price data using configured timeframe."""
         import pandas as pd
         import numpy as np
 
-        prices = data.prices_4h
+        # Use dynamic primary timeframe instead of hardcoded 4h
+        prices = data.prices_primary
         if prices.empty:
+            logger.warning(f"No price data available for timeframe {data.primary_timeframe}")
             return {}
 
         indicators = pd.DataFrame(index=prices.index)
