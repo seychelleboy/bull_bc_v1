@@ -572,9 +572,10 @@ class Config:
 
         Priority (highest to lowest):
         1. Environment variables (secrets only)
-        2. config.local.yaml (local overrides)
-        3. defaults.yaml (version controlled defaults)
-        4. Dataclass defaults (fallback)
+        2. Custom config file (if provided via config_path)
+        3. config.local.yaml (local overrides)
+        4. defaults.yaml (version controlled defaults)
+        5. Dataclass defaults (fallback)
         """
         # Load YAML files
         defaults_path = CONFIG_DIR / 'defaults.yaml'
@@ -585,6 +586,18 @@ class Config:
 
         # Merge: defaults <- local overrides
         yaml_config = _deep_merge(defaults, local)
+
+        # Apply custom config file if provided (highest priority)
+        if config_path:
+            custom_path = Path(config_path)
+            if custom_path.exists():
+                custom = _load_yaml(custom_path)
+                yaml_config = _deep_merge(yaml_config, custom)
+                import logging
+                logging.getLogger(__name__).info(f"Loaded custom config: {config_path}")
+            else:
+                import logging
+                logging.getLogger(__name__).warning(f"Custom config not found: {config_path}")
 
         # Create config instance
         config = cls()

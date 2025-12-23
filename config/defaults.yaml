@@ -77,12 +77,12 @@ trading:
 # -----------------------------------------------------------------------------
 risk:
   # Account settings
-  initial_balance: 10000.0
+  initial_balance: 1000.0
   max_leverage: 3.0
 
   # Position sizing
   risk_per_trade_percent: 2.0    # Risk 2% per trade
-  max_position_size_usd: 10000.0
+  max_position_size_usd: 1000.0
   max_position_percent: 0.25     # Max 25% of account per position
 
   # Daily limits

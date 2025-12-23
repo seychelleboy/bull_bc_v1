@@ -160,20 +160,42 @@ if "%BOT_ARGS%"=="" (
     echo   start.bat --analyze    - Run single analysis
     echo   start.bat --status     - Show system status
     echo   start.bat --paper      - Run in paper trading mode
-    echo   start.bat run          - Start continuous scanning
+    echo   start.bat run          - Start continuous scanning [swing mode, 4h]
+    echo   start.bat run scalp    - Start scalping mode [5m timeframe]
     echo.
     exit /b 0
 )
 
-REM Handle 'run' command (clears args to start continuous scanning)
-set "TRIMMED_ARGS=!BOT_ARGS: =!"
-if /i "!TRIMMED_ARGS!"=="run" set "BOT_ARGS="
-if /i "!TRIMMED_ARGS!"=="--run" set "BOT_ARGS="
+REM Check for scalp mode: "run scalp" or just "scalp"
+echo %* | findstr /i "scalp" >nul
+if %ERRORLEVEL%==0 goto :scalp_mode
 
-echo.
-echo Starting Bull BC1 (LONG Only)...
-echo.
+REM Check for plain run command
+set "CHECK_RUN=!BOT_ARGS: =!"
+if /i "!CHECK_RUN!"=="run" goto :swing_mode
+if /i "!CHECK_RUN!"=="--run" goto :swing_mode
 
+REM Other arguments (--analyze, --status, --paper, etc.)
+echo.
+echo Starting Bull BC1...
+echo.
 venv\Scripts\python.exe main.py !BOT_ARGS!
+goto :done
+
+:scalp_mode
+echo.
+echo Starting Bull BC1 - SCALP MODE [5m timeframe]...
+echo.
+venv\Scripts\python.exe main.py --mode scalp
+goto :done
+
+:swing_mode
+echo.
+echo Starting Bull BC1 - SWING MODE [4h timeframe]...
+echo.
+venv\Scripts\python.exe main.py
+goto :done
+
+:done
 
 endlocal

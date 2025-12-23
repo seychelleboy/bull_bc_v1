@@ -4,7 +4,8 @@ Bull BC1 - Bitcoin Bull Detection Bot (Long-Only)
 A BAIT-enhanced trading bot for detecting bullish opportunities in BTC.
 
 Usage:
-    python main.py              # Continuous scanning
+    python main.py              # Continuous scanning (swing mode)
+    python main.py --mode scalp # Scalping mode (5m timeframe)
     python main.py --analyze    # Single analysis cycle
     python main.py --status     # Show system status
     python main.py --paper      # Paper trading mode
@@ -94,6 +95,14 @@ Examples:
         help='Path to YAML config file'
     )
 
+    parser.add_argument(
+        '--mode', '-m',
+        type=str,
+        choices=['swing', 'scalp'],
+        default='swing',
+        help='Trading mode: swing (4h, default) or scalp (5m)'
+    )
+
     return parser.parse_args()
 
 
@@ -131,19 +140,26 @@ async def run_analysis(engine: BullEngine) -> None:
         await engine.shutdown()
 
 
-async def run_continuous(engine: BullEngine) -> None:
+async def run_continuous(engine: BullEngine, mode: str = 'swing') -> None:
     """Run continuous scanning loop."""
     global _engine
     _engine = engine
 
+    mode_label = "SCALP MODE (5m)" if mode == 'scalp' else "SWING MODE (4h)"
+
     print("\n" + "=" * 60)
-    print("BULL BC1 - Continuous Scanning Mode")
+    print(f"BULL BC1 - {mode_label}")
     print("=" * 60)
-    print(f"Symbol:      {engine.config.trading.symbol}")
+    print(f"Symbol:       {engine.config.trading.symbol}")
+    print(f"Timeframe:    {engine.config.trading.primary_timeframe}")
     print(f"Auto-Execute: {engine.config.trading.auto_execute}")
-    print(f"Paper Trade: {engine.config.trading.paper_trade}")
-    print(f"Confidence:  {engine.config.trading.min_confidence_threshold}%")
+    print(f"Paper Trade:  {engine.config.trading.paper_trade}")
+    print(f"Confidence:   {engine.config.trading.min_confidence_threshold}%")
     print(f"Scan Interval: {engine.config.trading.scan_interval_seconds}s")
+    print(f"BAIT Weights: B={engine.config.scoring.behavioral_weight} "
+          f"A={engine.config.scoring.analytical_weight} "
+          f"I={engine.config.scoring.informational_weight} "
+          f"T={engine.config.scoring.technical_weight}")
     print("=" * 60)
     print("Press Ctrl+C to stop...")
 
@@ -210,8 +226,14 @@ def main():
 
     logger = logging.getLogger(__name__)
 
+    # Determine config file based on mode
+    config_file = args.config
+    if args.mode == 'scalp' and not config_file:
+        config_file = str(Path(__file__).parent / 'config' / 'scalping.yaml')
+        print(f"[SCALP MODE] Loading scalping configuration...")
+
     # Load configuration
-    config = Config.load()
+    config = Config.load(config_file)
 
     # Validate configuration
     errors = config.validate()
@@ -245,7 +267,7 @@ def main():
         if args.analyze:
             asyncio.run(run_analysis(engine))
         else:
-            asyncio.run(run_continuous(engine))
+            asyncio.run(run_continuous(engine, args.mode))
 
     except KeyboardInterrupt:
         print("\nInterrupted by user")
