@@ -20,24 +20,28 @@ trading:
   # Scan interval matched to cache TTL (no redundant scans)
   scan_interval_seconds: 60        # Scan every 60 seconds (matches intraday_ttl)
 
-  # Tighter position management
+  # Position management - OPTIMIZED for BTC volatility
   use_trailing_stop: true
-  trailing_stop_atr_multiplier: 1.5   # Tighter trailing
-  initial_stop_atr_multiplier: 1.5    # Tighter initial stop
+  trailing_stop_atr_multiplier: 1.75  # Was 1.5 → Give room to breathe
+  initial_stop_atr_multiplier: 2.0    # Was 1.5 → Industry standard for crypto
 
 # -----------------------------------------------------------------------------
-# RISK MANAGEMENT (SCALPING - Tighter Stops)
+# RISK MANAGEMENT (SCALPING - Evidence-Based Stops)
+# -----------------------------------------------------------------------------
+# OPTIMIZED 2025-12-23: Widened stops to prevent premature stop-outs
+# Evidence: BTC 5m ATR = $150-400, noise floor = $200-250
+# Old 0.15-0.5% stops were getting hit by normal volatility
 # -----------------------------------------------------------------------------
 risk:
-  # Tighter stop distances for scalping
-  min_stop_distance_pct: 0.15      # 0.15% minimum stop
-  max_stop_distance_pct: 0.5       # 0.5% maximum stop
+  # Widened stop distances for BTC volatility
+  min_stop_distance_pct: 0.35      # Was 0.15% → $308 @ $88k (2σ noise tolerance)
+  max_stop_distance_pct: 0.80      # Was 0.5%  → $704 @ $88k (room for spikes)
 
-  # Lower R:R acceptable for higher win rate scalping
-  min_reward_risk_ratio: 1.5       # 1.5:1 R:R for scalping
+  # Maintain reasonable R:R
+  min_reward_risk_ratio: 1.8       # Was 1.5 → Compensate for wider stops
 
-  # Same risk per trade
-  risk_per_trade_percent: 1.0      # Slightly lower risk for more frequent trades
+  # Reduced risk per trade (wider stops = smaller position = same $ risk)
+  risk_per_trade_percent: 0.65     # Was 1.0% → Maintain similar dollar exposure
 
   # More trades allowed per day
   max_daily_trades: 20             # More trades for scalping
