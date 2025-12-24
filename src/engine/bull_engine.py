@@ -218,7 +218,7 @@ class BullEngine(BaseEngine):
             stop_loss = scenario_result.stop_loss
             take_profit = scenario_result.take_profit
 
-            # Validate levels for LONG
+            # Validate levels for LONG - check direction first
             if stop_loss >= entry_price:
                 logger.warning("Invalid stop loss for LONG, recalculating...")
                 atr = self._get_atr(indicators)
@@ -227,6 +227,18 @@ class BullEngine(BaseEngine):
                 )
                 stop_loss = levels.stop_loss
                 take_profit = levels.take_profit
+
+            # Step 8b: ENFORCE min/max stop distance from config
+            # This ensures scenario-generated stops respect configured risk limits
+            stop_loss, was_adjusted = self._validate_stop_distance(entry_price, stop_loss)
+            if was_adjusted:
+                # Recalculate take_profit to maintain minimum R:R ratio
+                risk = entry_price - stop_loss
+                take_profit = entry_price + (self.config.risk.min_reward_risk_ratio * risk)
+                logger.info(
+                    f"Adjusted TP to ${take_profit:,.0f} to maintain "
+                    f"{self.config.risk.min_reward_risk_ratio}:1 R:R"
+                )
 
             # Step 9: Update balance from MT5 and calculate position size
             if self.mt5_connector and not self.config.trading.paper_trade:
@@ -466,6 +478,53 @@ class BullEngine(BaseEngine):
             if not pd.isna(atr):
                 return atr
         return 100  # Default fallback
+
+    def _validate_stop_distance(
+        self,
+        entry_price: float,
+        stop_loss: float
+    ) -> tuple:
+        """
+        Validate and adjust stop to be within min/max bounds from config.
+
+        For LONG positions, stop loss is BELOW entry price.
+        - Too tight: stop too close to entry → widen by moving stop DOWN
+        - Too wide: stop too far from entry → tighten by moving stop UP
+
+        Args:
+            entry_price: Entry price for the trade
+            stop_loss: Proposed stop loss level
+
+        Returns:
+            Tuple of (adjusted_stop_loss, was_adjusted)
+        """
+        min_stop_pct = self.config.risk.min_stop_distance_pct
+        max_stop_pct = self.config.risk.max_stop_distance_pct
+
+        min_distance = entry_price * (min_stop_pct / 100)
+        max_distance = entry_price * (max_stop_pct / 100)
+
+        current_distance = abs(entry_price - stop_loss)
+
+        if current_distance < min_distance:
+            # Too tight - widen to minimum (move stop DOWN for LONG)
+            adjusted = entry_price - min_distance
+            logger.warning(
+                f"Stop too tight: ${current_distance:.0f} ({current_distance/entry_price*100:.3f}%) "
+                f"< min ${min_distance:.0f} ({min_stop_pct}%), adjusted to ${adjusted:,.0f}"
+            )
+            return adjusted, True
+
+        if current_distance > max_distance:
+            # Too wide - tighten to maximum (move stop UP for LONG)
+            adjusted = entry_price - max_distance
+            logger.warning(
+                f"Stop too wide: ${current_distance:.0f} ({current_distance/entry_price*100:.3f}%) "
+                f"> max ${max_distance:.0f} ({max_stop_pct}%), adjusted to ${adjusted:,.0f}"
+            )
+            return adjusted, True
+
+        return stop_loss, False
 
     def _save_signal(self, signal: Signal) -> None:
         """Save signal to database."""
